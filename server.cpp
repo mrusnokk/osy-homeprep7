@@ -9,8 +9,19 @@
 #include <csignal>
 #include <sys/wait.h>
 #include <cerrno>
+#include <pthread.h>
 
+constexpr int MAX_CLIENTS = 10;
 int zoo_map[10][10];
+
+struct Client
+{
+    int socket;
+    char name[64];
+    int x, y;
+    bool active;
+};
+Client clients[MAX_CLIENTS];
 
 void send_area(int cl, int cx, int cy)
 {
@@ -39,15 +50,45 @@ void send_area(int cl, int cx, int cy)
     write(cl, response, strlen(response));
 }
 
-void serve_player(int cl)
+void write_all_client(char *msg, int index)
 {
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        if (clients[i].active and i != index)
+        {
+            write(clients[i].socket, msg, strlen(msg));
+        }
+    }
+}
+
+void *serve_client(void *arg)
+{
+    int cl = (int)(long)arg;
+
     char buffer[1024];
-    char name[64] = "";
     bool registered = false;
 
-    srand(time(nullptr) ^ getpid());
-    int x = rand() % 10;
-    int y = rand() % 10;
+    int slot = -1;
+
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        if (clients[i].active == false)
+        {
+            clients[i].active = true;
+            clients[i].socket = cl;
+            clients[i].name[0] = '\0';
+            clients[i].x = rand() % 10;
+            clients[i].y = rand() % 10;
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0)
+    {
+
+        close(cl);
+        return nullptr;
+    }
 
     pollfd pfd{};
     pfd.fd = cl;
@@ -81,14 +122,14 @@ void serve_player(int cl)
             }
             else
             {
-                snprintf(name, sizeof(name), "%s", buffer + 6);
+                snprintf(clients[slot].name, sizeof(clients[slot].name), "%s", buffer + 6);
                 registered = true;
 
                 char welcome_msg[128];
-                snprintf(welcome_msg, sizeof(welcome_msg), "WELCOME %s\n", name);
+                snprintf(welcome_msg, sizeof(welcome_msg), "WELCOME %s\n", clients[slot].name);
                 write(cl, welcome_msg, strlen(welcome_msg));
 
-                send_area(cl, x, y);
+                send_area(cl, clients[slot].x, clients[slot].y);
             }
         }
         else if (strcmp(buffer, "WHERE") == 0)
@@ -100,7 +141,7 @@ void serve_player(int cl)
             }
             else
             {
-                send_area(cl, x, y);
+                send_area(cl, clients[slot].x, clients[slot].y);
             }
         }
         else if (strncmp(buffer, "MOVE ", 5) == 0)
@@ -112,7 +153,7 @@ void serve_player(int cl)
             }
             else
             {
-                int nx = x, ny = y;
+                int nx = clients[slot].x, ny = clients[slot].y;
                 bool valid = true;
                 const char *dir = buffer + 5;
                 if (strcmp(dir, "NORTH") == 0)
@@ -140,9 +181,9 @@ void serve_player(int cl)
                 }
                 else
                 {
-                    x = nx;
-                    y = ny;
-                    send_area(cl, x, y);
+                    clients[slot].x = nx;
+                    clients[slot].y = ny;
+                    send_area(cl, clients[slot].x, clients[slot].y);
                 }
             }
         }
@@ -169,6 +210,14 @@ void serve_player(int cl)
                 }
             }
         }
+        else if (strncmp(buffer, "MSG ", 4) == 0)
+        {
+            char *msg = buffer + 4;
+            char out[600];
+            snprintf(out, sizeof(out), "%s: %s\n", clients[slot].name, msg);
+            printf("%s", out);
+            write_all_client(out, slot);
+        }
         else if (strcmp(buffer, "QUIT") == 0)
         {
             const char *msg = "BYE\n";
@@ -181,7 +230,33 @@ void serve_player(int cl)
             write(cl, msg, strlen(msg));
         }
     }
+    clients[slot].active = false;
     close(cl);
+    return nullptr;
+}
+
+void write_all(char *msg)
+{
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        if (clients[i].active)
+        {
+            write(clients[i].socket, msg, strlen(msg));
+        }
+    }
+}
+
+void *console_thread(void *)
+{
+    char line[512];
+    while (fgets(line, sizeof(line), stdin))
+    {
+        line[strcspn(line, "\r\n")] = '\0';
+        char out[600];
+        snprintf(out, sizeof(out), "Server: %s\n", line);
+        write_all(out);
+    }
+    return nullptr;
 }
 
 int main(int argc, char *argv[])
@@ -203,8 +278,7 @@ int main(int argc, char *argv[])
     int PORT = atoi(argv[optind_arg]);
 
     srand(time(nullptr));
-
-    signal(SIGCHLD, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);
 
     for (int y = 0; y < 10; y++)
     {
@@ -228,33 +302,34 @@ int main(int argc, char *argv[])
     if (listen(soc, 5) < 0)
         exit(EXIT_FAILURE);
 
+    pthread_t c;
+
+    if (pthread_create(&c, NULL, console_thread, NULL) != 0)
+    {
+        perror("THREAD CREATE ERROR");
+    }
+    else
+    {
+        pthread_detach(c);
+    }
+
     while (1)
     {
         int cl = accept(soc, nullptr, nullptr);
         if (cl < 0)
             continue;
+        if (debug)
+        {
+            printf("Pripojen novy client!\n");
+        }
 
-        pid_t p = fork();
-        if (p < 0)
+        pthread_t t;
+        if (pthread_create(&t, NULL, &serve_client, (void *)(long)cl) != 0)
         {
             close(cl);
             continue;
         }
-
-        if (p == 0)
-        {
-            if(debug){
-                printf("Pripojen novy client!\n");
-            }
-            close(soc);
-            signal(SIGCHLD, SIG_DFL);
-            serve_player(cl);
-            _exit(EXIT_SUCCESS);
-        }
-        else
-        {
-            close(cl);
-        }
+        pthread_detach(t);
     }
     return 0;
 }

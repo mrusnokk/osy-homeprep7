@@ -1,5 +1,5 @@
 CXX      := g++
-CXXFLAGS := -Wall -Wextra -std=c++17
+CXXFLAGS := -Wall -Wextra -std=c++17 -pthread
 
 TARGETS := zoo_server zoo_client zoo_info 
 

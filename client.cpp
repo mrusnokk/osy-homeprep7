@@ -15,16 +15,18 @@ int main(int argc, char *argv[])
 {
     if (argc < 3)
     {
+        perror("ERROR: run the program with agrs <ip> <port>");
         return -1;
     }
 
     const char *ip = argv[1];
     int port = atoi(argv[2]);
 
-    printf("Zadej jmeno: ");
+    printf("Name: ");
     char jmeno[64];
     if (!fgets(jmeno, sizeof(jmeno), stdin))
     {
+        perror("FGETS ERROR : Cannot process name!\n");
         return EXIT_FAILURE;
     }
     jmeno[strcspn(jmeno, "\r\n")] = '\0';
@@ -40,11 +42,13 @@ int main(int argc, char *argv[])
     int soc = socket(AF_INET, SOCK_STREAM, 0);
     if (soc < 0)
     {
+        perror("Socket ERROR\n");
         return EXIT_FAILURE;
     }
 
     if (connect(soc, (const sockaddr *)&addr, sizeof(addr)) < 0)
     {
+        perror("Cnnect ERROR");
         close(soc);
         return EXIT_FAILURE;
     }
@@ -56,6 +60,7 @@ int main(int argc, char *argv[])
     snprintf(hello_buf, sizeof(hello_buf), "HELLO %s\n", jmeno);
     if (write(soc, hello_buf, strlen(hello_buf)) < 0)
     {
+        perror("Write ERROR");
         close(soc);
         return EXIT_FAILURE;
     }
@@ -77,6 +82,7 @@ int main(int argc, char *argv[])
         {
             if (errno == EINTR)
                 continue;
+            perror("Poll ERROR");
             break;
         }
 
@@ -84,7 +90,10 @@ int main(int argc, char *argv[])
         {
             const char *mv = moves[rand() % 4];
             if (write(soc, mv, strlen(mv)) < 0)
+            {
+                perror("WRITE ERROR");
                 break;
+            }
             continue;
         }
 
@@ -94,7 +103,10 @@ int main(int argc, char *argv[])
             if (n <= 0)
                 break;
             if (write(soc, buf, n) < 0)
+            {
+                perror("WRITE ERROR");
                 break;
+            }
         }
 
         if (fds[1].revents & (POLLIN | POLLERR | POLLHUP))
