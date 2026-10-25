@@ -21,6 +21,7 @@ int main(int argc, char *argv[])
     const char *ip = argv[1];
     int port = atoi(argv[2]);
 
+    printf("Zadej jmeno: ");
     char jmeno[64];
     if (!fgets(jmeno, sizeof(jmeno), stdin))
     {

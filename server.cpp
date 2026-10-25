@@ -186,6 +186,7 @@ void serve_player(int cl)
 
 int main(int argc, char *argv[])
 {
+    bool debug = false;
     if (argc < 2)
     {
         return -1;
@@ -194,6 +195,7 @@ int main(int argc, char *argv[])
     int optind_arg = 1;
     if (strcmp(argv[1], "-d") == 0)
     {
+        debug = true;
         if (argc < 3)
             return -1;
         optind_arg = 2;
@@ -241,6 +243,9 @@ int main(int argc, char *argv[])
 
         if (p == 0)
         {
+            if(debug){
+                printf("Pripojen novy client!\n");
+            }
             close(soc);
             signal(SIGCHLD, SIG_DFL);
             serve_player(cl);
